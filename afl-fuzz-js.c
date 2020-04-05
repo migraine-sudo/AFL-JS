@@ -7753,6 +7753,34 @@ static void save_cmdline(u32 argc, char** argv) {
 }
 
 
+void check_dharma()
+{
+	int stderr_fd[2];
+	const char *cmd="dharma123";
+	const char *argv[]={cmd};
+	//const char *env[]={0,NULL};
+	//char buf[10]=""; //Without this buf,the pipe will cause the program to Fault,i still confuse with this!
+	char msg_error[50]="";
+	
+	if(pipe(stderr_fd)<0)		//create a pipe 
+		FATAL("PiPE Fatil!");	
+	/*children progress*/
+	if(fork()==0)
+	{
+		close(stderr_fd[0]);
+		dup2(stderr_fd[1],STDERR_FILENO); 	//not fileno(stdout)
+		execlp(argv[0],"arg",(char * )0); //Don't call system(),it will fork a new progress
+	}	
+	else{
+	/*father progress*/
+	close(stderr_fd[1]);
+	if(read(stderr_fd[0],msg_error,10)==0)
+		FATAL("check dahrma uninstalled! You should use `pip install dharma` to Install or Add the path to dharma to $PATH.Maybe you can get help from https://github.com/MozillaSecurity/dharma`");
+	if(!strncmp(msg_error,"usage:",6))
+		OKF("check dharma installed!");
+	}
+}
+
 #ifndef AFL_LIB
 
 /* Main entry point */
@@ -8009,6 +8037,8 @@ int main(int argc, char** argv) {
   check_if_tty();
 
   get_core_count();
+
+  check_dharma();
 
 #ifdef HAVE_AFFINITY
   bind_to_free_cpu();
