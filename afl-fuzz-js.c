@@ -7780,6 +7780,54 @@ void check_dharma()
 	}
 }
 
+/* Scan the Dir of dg model. */
+
+typedef struct DG_list{
+  char *name;
+  int inited;
+  int used;
+  struct DG_list *next;
+}DList;
+DList *dlist;
+void check_dg_model()
+{
+  OKF("Checking dg model...");
+  struct dirent **nl;
+  DList *ndlist,*tmp;
+  dlist=(DList *)malloc(sizeof(DList));
+  dlist->next=NULL;
+  int n=-1;
+  if(dg_dir)
+  {
+    n=scandir(dg_dir,&nl,NULL,NULL);	
+    for(int i=0;i<n;i++){
+	//printf("name=%s\n",nl[i]->d_name);
+	if(strcmp(nl[i]->d_name,".")&&strcmp(nl[i]->d_name,"..")){
+	   //printf("d_name=%s\n",nl[i]->d_name);
+	   tmp=dlist;
+	   ndlist=(DList *)malloc(sizeof(DList));
+	   ndlist->name=nl[i]->d_name;
+	   ndlist->inited=1;
+	   ndlist->used=0;
+	   ndlist->next=tmp;
+	   dlist=ndlist;
+	   }       
+	}
+    }
+    /* Dlist Debug. */
+    int stop=1;
+    tmp=dlist;
+    while(stop){
+	//printf("test_name=%s\n",tmp->name);
+	if(tmp->next->next==NULL)
+	  stop=0;
+	tmp=tmp->next;
+    }
+    if(n<0)
+      FATAL("[+]This empty in the db_dir,you must put at least one dg model in.Or You can use our case model!\n");
+   	
+}
+
 #ifndef AFL_LIB
 
 /* Main entry point */
@@ -8029,6 +8077,7 @@ int main(int argc, char** argv) {
   if(dg_dir){
     OKF("AFL-JS Working in javascript Mode...");
     check_dharma();
+    check_dg_model();
    }
   save_cmdline(argc, argv);
 
