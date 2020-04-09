@@ -228,6 +228,9 @@ static u64 total_bitmap_size,         /* Total bit count for all bitmaps  */
 
 static s32 cpu_core_count;            /* CPU core count                   */
 
+int recreate=0;			      /* if recreate JS case              */
+
+
 #ifdef HAVE_AFFINITY
 
 static s32 cpu_aff = -1;       	      /* Selected CPU core                */
@@ -2771,7 +2774,11 @@ static void perform_dry_run(char** argv) {
 
         if (q == queue) check_map_coverage();
 
-        if (crash_mode) FATAL("Test case '%s' does *NOT* crash", fn);
+        if (crash_mode) {
+	  FATAL("Test case '%s' does *NOT* crash", fn);
+	  //OKF("Test case '%s' does *NOT* crash", fn);
+	  //recreate=1;
+	}
 
         break;
 
@@ -2946,7 +2953,19 @@ static void link_or_copy(u8* old_path, u8* new_path) {
   if (sfd < 0) PFATAL("Unable to open '%s'", old_path);
 
   dfd = open(new_path, O_WRONLY | O_CREAT | O_EXCL, 0600);
-  if (dfd < 0) PFATAL("Unable to create '%s'", new_path);
+  if (dfd < 0) 
+	{
+/*
+	  char *CMD=(char *)malloc(0x80);
+	  char *cmd="rm ";
+	  strcpy(CMD,cmd);
+          strcat(CMD,new_path);
+          //printf("CMD=%s",CMD);
+          system(CMD);
+	    dfd = open(new_path, O_WRONLY | O_CREAT | O_EXCL, 0600);
+*/
+	 PFATAL("Unable to create '%s'", new_path);
+	}
 
   tmp = ck_alloc(64 * 1024);
 
@@ -7788,44 +7807,183 @@ typedef struct DG_list{
   int used;
   struct DG_list *next;
 }DList;
+
 DList *dlist;
+
 void check_dg_model()
 {
   OKF("Checking dg model...");
+
   struct dirent **nl;
   DList *ndlist,*tmp;
   dlist=(DList *)malloc(sizeof(DList));
   dlist->next=NULL;
+
   int n=-1;
+
   if(dg_dir)
   {
+
     n=scandir(dg_dir,&nl,NULL,NULL);	
+
     for(int i=0;i<n;i++){
+
 	//printf("name=%s\n",nl[i]->d_name);
 	if(strcmp(nl[i]->d_name,".")&&strcmp(nl[i]->d_name,"..")){
+
 	   //printf("d_name=%s\n",nl[i]->d_name);
 	   tmp=dlist;
+
 	   ndlist=(DList *)malloc(sizeof(DList));
 	   ndlist->name=nl[i]->d_name;
 	   ndlist->inited=1;
 	   ndlist->used=0;
 	   ndlist->next=tmp;
+
 	   dlist=ndlist;
 	   }       
 	}
     }
     /* Dlist Debug. */
+    /*
     int stop=1;
     tmp=dlist;
+
     while(stop){
+
 	//printf("test_name=%s\n",tmp->name);
 	if(tmp->next->next==NULL)
 	  stop=0;
+
 	tmp=tmp->next;
     }
+    */
     if(n<0)
       FATAL("[+]This empty in the db_dir,you must put at least one dg model in.Or You can use our case model!\n");
    	
+}
+
+/* Create Js cases into in_dir for fuzzing.Create One case Only Once at a time,and one by one In order of queue */
+void create_testcase()
+{
+    //OKF("Creating JS cases...");
+
+    //char *cmd="dharma -grammars afl-dg/poc.dg > afl-in/Default.poc";
+    char *cmd="dharma -grammars  2>/dev/null ";//+dg_name + ">" + in_dir +"/Default.poc"
+  
+    int stop=1,use_times=0;
+
+    char *dg_name,*CMD;
+
+    DList *tmp;
+    tmp=dlist;
+
+    while(stop){
+
+	if(tmp->used==use_times){
+
+          dg_name=(char *)malloc(strlen(dg_dir)+strlen(tmp->name)+1);
+
+	  CMD=(char *)malloc(strlen(dg_dir)+strlen(tmp->name)+strlen(cmd)+strlen(in_dir)+20);
+
+	  strcpy(dg_name,dg_dir);
+	  strcat(dg_name,"/");
+	  strcat(dg_name,tmp->name);
+
+	  //printf("dg_name=%s\n",dg_name);
+	  strcpy(CMD,cmd);
+	  strcat(CMD,dg_name);
+	  strcat(CMD,">");
+	  strcat(CMD,in_dir);
+          strcat(CMD,"/Default.poc");
+
+	  //printf("cmd=%s",CMD);
+	  if(system(CMD))
+
+		FATAL("Fail to create testcase,Maybe you should use normal mode!");
+
+	  tmp->used++;//used add
+
+	  stop=0;
+	}
+
+	tmp=tmp->next;
+
+	/*if doesn't match any model,let use_time++,and do it again*/
+	if(tmp->next==NULL)	{
+
+	  use_times++; 
+
+	  tmp=dlist; 
+	}
+    }
+}
+
+
+/*Match pattern ,check if any patterns can be found in str ,and if match return 1 otherwise return 0*/
+int Pattern_matching(char *str,char *pattern)
+{
+   char *tmp=str;
+   char *pt,*t;
+   int ifmatch=0;
+
+   while(*tmp!='\x00')
+   {
+
+	if(*tmp==*pattern){ 
+
+	 pt=pattern;
+	  t=tmp;
+	  ifmatch=1;
+
+	  while(*pt!='\x00'){
+
+	     if(*t!=*pt){
+
+	       ifmatch=0;
+	       break;
+	     }
+	     else{
+
+	     	t++;
+		pt++;
+      	     }
+          }
+	}
+        
+	tmp++;
+   }
+   return ifmatch;
+}
+
+int check_crash(u8* fname)
+{
+  //OKF("target=%s",fname);
+  char cmd[200];
+    FILE * p_file = NULL;
+  strcpy(cmd,fname);
+  strcat(cmd," ");
+  strcat(cmd,in_dir);
+  strcat(cmd,"/Default.poc 2>&1");
+  //printf("cmd=%s",cmd);
+
+    p_file = popen(cmd, "r");
+    char buf[1024]; 
+    int crash=0;
+  //sprintf(buf,"error:%s\n",strerror(errno));
+    if (!p_file) {  
+        fprintf(stderr, "Erro to popen");
+    }
+
+    while (fgets(buf, 1024, p_file) != NULL) {
+	int ifmatch=Pattern_matching(buf,"C stack trace");
+	//printf("ifmatch=%d\n",ifmatch);
+	if(ifmatch)
+	  crash=1;
+        //fprintf(stdout, "buf=%s", buf);  
+    }
+    pclose(p_file);
+  return crash;
 }
 
 #ifndef AFL_LIB
@@ -8074,11 +8232,6 @@ int main(int argc, char** argv) {
   if (getenv("AFL_LD_PRELOAD"))
     FATAL("Use AFL_PRELOAD instead of AFL_LD_PRELOAD");
 
-  if(dg_dir){
-    OKF("AFL-JS Working in javascript Mode...");
-    check_dharma();
-    check_dg_model();
-   }
   save_cmdline(argc, argv);
 
   fix_up_banner(argv[optind]);
@@ -8097,6 +8250,23 @@ int main(int argc, char** argv) {
   setup_post();
   setup_shm();
   init_count_class16();
+
+  /*Javascript Mode*/
+   if(dg_dir){
+    OKF("AFL-JS Working in javascript Mode...");
+    check_dharma();
+    check_dg_model();
+    int ifstop;
+    OKF("Creating testcase... ");
+    if(crash_mode){
+    do{create_testcase();
+	ifstop=check_crash(argv[optind]);
+	}
+	while(!ifstop);
+    }
+    else
+      create_testcase();
+   }
 
   setup_dirs_fds();
   read_testcases();
@@ -8121,7 +8291,18 @@ int main(int argc, char** argv) {
   else
     use_argv = argv + optind;
 
-  perform_dry_run(use_argv);
+perform_dry_run(use_argv);
+/*  do { 
+     create_testcase();
+     read_testcases();
+     //load_auto();
+     //pivot_inputs();
+     perform_dry_run(use_argv);
+     recreate--;
+  }
+  while(recreate==1);
+*/
+    
 
   cull_queue();
 
